@@ -1,0 +1,8 @@
+{
+  "name": "Remix: AI Virtual Try-On",
+  "description": "An AI-powered virtual try-on application using Kolors-Virtual-Try-On model.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
