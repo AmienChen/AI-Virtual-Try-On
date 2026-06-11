@@ -152,6 +152,98 @@ async function startServer() {
     }
   });
 
+  // API route for Background Removal
+  app.post("/api/remove-bg", async (req, res) => {
+    try {
+      const { image } = req.body;
+      if (!image) {
+        return res.status(400).json({ error: "請上傳圖片" });
+      }
+
+      console.log("Uploading file to Gradio server (briaai/BRIA-RMBG-1.4)...");
+      const base64Data = image.includes(',') ? image.split(',')[1] : image;
+      const mimeType = image.includes(';') ? image.split(';')[0].split(':')[1] : 'image/png';
+      const buffer = Buffer.from(base64Data, 'base64');
+      const blob = new Blob([buffer], { type: mimeType });
+      const fd = new FormData();
+      fd.append('files', blob, 'image.png');
+      
+      const uploadRes = await fetch("https://briaai-bria-rmbg-1-4.hf.space/upload", {
+        method: "POST",
+        body: fd
+      });
+      if (!uploadRes.ok) {
+        throw new Error(`Upload failed: ${uploadRes.status}`);
+      }
+      const uploadData = await uploadRes.json();
+      const uploadedPath = uploadData[0];
+
+      console.log("Joining inference queue...");
+      const session_hash = Math.random().toString(36).substring(2);
+      const joinRes = await fetch("https://briaai-bria-rmbg-1-4.hf.space/queue/join", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fn_index: 0,
+          session_hash,
+          data: [{ path: uploadedPath }]
+        })
+      });
+      if (!joinRes.ok) throw new Error(`Join queue failed: ${joinRes.status}`);
+      
+      console.log("Listening to queue data stream...");
+      const dataRes = await fetch("https://briaai-bria-rmbg-1-4.hf.space/queue/data?session_hash=" + session_hash);
+      const dataText = await dataRes.text();
+      
+      let resultPath;
+      for (const line of dataText.split('\n')) {
+        if (line.startsWith('data: ')) {
+          try {
+            const event = JSON.parse(line.substring(6));
+            if (event.msg === 'process_completed') {
+              if (event.success) {
+                resultPath = event.output.data[0].path;
+              } else {
+                throw new Error("AI 模型生成去背失敗");
+              }
+            }
+          } catch(e) {}
+        }
+      }
+
+      if (!resultPath) {
+        throw new Error("伺服器沒有回傳處理完成的圖片路徑");
+      }
+
+      const resultImageUrl = "https://briaai-bria-rmbg-1-4.hf.space/file=" + resultPath;
+
+      console.log("Fetching bg removal result image for base64...");
+      try {
+        const imgResponse = await fetch(resultImageUrl);
+        if (!imgResponse.ok) {
+          throw new Error("無法從 AI 伺服器獲取結果圖片");
+        }
+        
+        const arrayBuffer = await imgResponse.arrayBuffer();
+        const outBuffer = Buffer.from(arrayBuffer);
+        const outMimeType = imgResponse.headers.get('content-type') || 'image/png';
+        const base64Image = `data:${outMimeType};base64,${outBuffer.toString('base64')}`;
+        
+        res.json({ resultImage: base64Image });
+      } catch (fetchError) {
+        console.error("Error converting bg removal result to base64:", fetchError);
+        res.json({ resultImage: resultImageUrl });
+      }
+
+    } catch (error: any) {
+      console.error("BG Removal detailed error:", error);
+      res.status(500).json({ 
+        error: "去背失敗，系統繁忙中",
+        originalError: error.message 
+      });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const { createServer: createViteServer } = await import("vite");

@@ -4,7 +4,7 @@
  */
 
 import { useState, useRef, useEffect, MouseEvent as ReactMouseEvent, TouchEvent as ReactTouchEvent } from 'react';
-import { X, Crop, Move, Sparkles } from 'lucide-react';
+import { X, Crop, Move, Sparkles, Wand2, Loader2 } from 'lucide-react';
 import { motion } from 'motion/react';
 
 interface ImageCropperProps {
@@ -26,6 +26,9 @@ export default function ImageCropper({ imageSrc, onCropComplete, onCancel, saveB
   // Crop area represented as percentages (0 to 100)
   const [crop, setCrop] = useState({ x: 15, y: 15, w: 70, h: 70 });
   const [isProcessing, setIsProcessing] = useState(false);
+  const [localImageSrc, setLocalImageSrc] = useState(imageSrc);
+  const [isBgRemoving, setIsBgRemoving] = useState(false);
+  
   const dragStartRef = useRef<{
     activeHandle: string | null;
     startX: number;
@@ -141,7 +144,7 @@ export default function ImageCropper({ imageSrc, onCropComplete, onCancel, saveB
     setIsProcessing(true);
 
     const img = new Image();
-    img.src = imageSrc;
+    img.src = localImageSrc;
     img.onload = () => {
       try {
         const canvas = document.createElement('canvas');
@@ -172,6 +175,35 @@ export default function ImageCropper({ imageSrc, onCropComplete, onCancel, saveB
     img.onerror = () => {
       setIsProcessing(false);
     };
+  };
+
+  const handleRemoveBg = () => {
+    executeCrop(async (base64) => {
+      setIsBgRemoving(true);
+      try {
+        const res = await fetch("/api/remove-bg", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ image: base64 })
+        });
+        
+        if (!res.ok) {
+          const text = await res.text();
+          let errData;
+          try { errData = JSON.parse(text); } catch(e) {}
+          throw new Error(errData?.error || "去背失敗，系統繁忙中");
+        }
+        
+        const data = await res.json();
+        setLocalImageSrc(data.resultImage);
+        setCrop({ x: 0, y: 0, w: 100, h: 100 });
+      } catch (err: any) {
+        console.error("Remove bg error:", err);
+        alert(err.message || "去背失敗");
+      } finally {
+        setIsBgRemoving(false);
+      }
+    });
   };
 
   return (
@@ -207,7 +239,7 @@ export default function ImageCropper({ imageSrc, onCropComplete, onCancel, saveB
             {/* The Image */}
             <img 
               ref={imageRef}
-              src={imageSrc} 
+              src={localImageSrc} 
               alt="To Crop" 
               className="max-w-full max-h-[45vh] sm:max-h-[55vh] md:max-h-[60vh] object-contain block pointer-events-none"
             />
@@ -296,16 +328,29 @@ export default function ImageCropper({ imageSrc, onCropComplete, onCancel, saveB
           <p className="text-stone-500 text-[10px] sm:text-xs font-medium text-center leading-tight">
             請手動拖曳四個角角，或移動整塊透亮框選取範圍。完成後，點擊下方合適按鈕保存：
           </p>
+          <div className="flex justify-center mb-1">
+            <button
+               onClick={handleRemoveBg}
+               disabled={isProcessing || isBgRemoving}
+               className={`py-2 px-4 rounded-xl font-bold text-[11px] tracking-wider transition-all flex items-center gap-2 select-none cursor-pointer shadow-sm
+                 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200
+                 ${(isProcessing || isBgRemoving) ? 'opacity-50 cursor-not-allowed' : 'active:scale-95'}
+               `}
+            >
+               {isBgRemoving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
+               <span>{isBgRemoving ? 'AI 去背中...' : '進行自動去背 (選用)'}</span>
+            </button>
+          </div>
           <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center justify-center gap-2 sm:gap-3">
             {saveButtons.map((btn) => (
               <button
                 key={btn.id}
                 id={btn.id}
-                disabled={isProcessing}
+                disabled={isProcessing || isBgRemoving}
                 onClick={() => executeCrop(btn.onClick)}
                 className={`py-2.5 sm:py-3 px-3 sm:px-4 rounded-xl font-bold text-[10px] sm:text-xs tracking-wider uppercase transition-all flex items-center justify-center gap-1.5 sm:gap-2 select-none cursor-pointer text-center break-words
                   ${btn.className || 'bg-stone-800 text-white hover:bg-stone-900'} 
-                  ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'active:scale-95'}
+                  ${(isProcessing || isBgRemoving) ? 'opacity-50 cursor-not-allowed' : 'active:scale-95'}
                 `}
               >
                 <Sparkles className="w-3.5 h-3.5 shrink-0" />
