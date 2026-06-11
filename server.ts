@@ -1,6 +1,5 @@
 import express from "express";
 import path from "path";
-import { createServer as createViteServer } from "vite";
 import { Client, handle_file } from "@gradio/client";
 import dotenv from "dotenv";
 import fs from "node:fs";
@@ -15,6 +14,17 @@ async function startServer() {
 
   // Set limits for base64 images
   app.use(express.json({ limit: '20mb' }));
+  
+  // Handle express json parsing errors globally so they return JSON instead of HTML
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (err instanceof SyntaxError && 'status' in err && err.status === 400 && 'body' in err) {
+      return res.status(400).json({ error: 'Request body is invalid JSON' });
+    }
+    if (err.type === 'entity.too.large') {
+      return res.status(413).json({ error: '上傳的圖片過大，請裁切或壓縮後再試 (限制為 20MB)' });
+    }
+    next();
+  });
 
   // Helper to save base64 to temp file
   const saveTempImage = (dataUrl: string) => {
@@ -144,6 +154,7 @@ async function startServer() {
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",

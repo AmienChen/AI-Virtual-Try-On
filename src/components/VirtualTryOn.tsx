@@ -110,11 +110,28 @@ export default function VirtualTryOn({
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || '伺服器繁忙，請稍候重試');
+        const errorText = await response.text();
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch (e) {
+          throw new Error(
+            response.status === 404 
+              ? '找不到 API (404)。如果您部署在靜態網頁主機 (如 Vercel, GitHub Pages) 上，該環境可能不支援 Express 後端，請確認部署環境。' 
+              : `伺服器連線發生異常 (${response.status})`
+          );
+        }
+        throw new Error(errorData?.error || '伺服器繁忙，請稍候重試');
       }
 
-      const data = await response.json();
+      const responseText = await response.text();
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (e) {
+        throw new Error('伺服器回傳格式錯誤，請稍後再試');
+      }
+      
       setState(prev => ({ ...prev, resultImage: data.resultImage, isLoading: false }));
       showToast('試衣成功！趕快儲存此穿搭！', 'success');
     } catch (err: any) {
